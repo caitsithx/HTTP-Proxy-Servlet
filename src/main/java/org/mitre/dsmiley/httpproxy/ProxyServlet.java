@@ -28,8 +28,15 @@ import org.apache.http.client.methods.AbortableHttpRequest;
 import org.apache.http.client.params.ClientPNames;
 import org.apache.http.client.params.CookiePolicy;
 import org.apache.http.client.utils.URIUtils;
+import org.apache.http.config.Registry;
+import org.apache.http.config.RegistryBuilder;
+import org.apache.http.conn.socket.ConnectionSocketFactory;
+import org.apache.http.conn.socket.PlainConnectionSocketFactory;
+import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
 import org.apache.http.entity.InputStreamEntity;
 import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.apache.http.impl.conn.tsccm.ThreadSafeClientConnManager;
 import org.apache.http.message.BasicHeader;
 import org.apache.http.message.BasicHttpEntityEnclosingRequest;
@@ -37,8 +44,14 @@ import org.apache.http.message.BasicHttpRequest;
 import org.apache.http.message.HeaderGroup;
 import org.apache.http.params.BasicHttpParams;
 import org.apache.http.params.HttpParams;
+import org.apache.http.ssl.SSLContexts;
 import org.apache.http.util.EntityUtils;
 
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 import javax.servlet.ServletException;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServlet;
@@ -50,6 +63,10 @@ import java.io.OutputStream;
 import java.lang.reflect.Constructor;
 import java.net.HttpCookie;
 import java.net.URI;
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
 import java.util.BitSet;
 import java.util.Enumeration;
 import java.util.Formatter;
@@ -144,7 +161,59 @@ public class ProxyServlet extends HttpServlet {
     hcParams.setParameter(ClientPNames.COOKIE_POLICY, CookiePolicy.IGNORE_COOKIES);
     hcParams.setBooleanParameter(ClientPNames.HANDLE_REDIRECTS, false); // See #70
     readConfigParam(hcParams, ClientPNames.HANDLE_REDIRECTS, Boolean.class);
-    proxyClient = createHttpClient(hcParams);
+    
+    try {
+		proxyClient = getSslClient();
+	} catch (Exception e) {
+		throw new ServletException(e);
+	} //createHttpClient(hcParams);
+  }
+  
+  private HttpClient getSslClient() throws KeyManagementException, NoSuchAlgorithmException {
+	  SSLContext sslContext = SSLContexts.custom().build();
+
+
+      sslContext.init(null, new TrustManager[]{new X509TrustManager(){
+
+		@Override
+		public void checkClientTrusted(X509Certificate[] arg0, String arg1) throws CertificateException {
+			// TODO Auto-generated method stub
+			
+		}
+
+		@Override
+		public void checkServerTrusted(X509Certificate[] arg0, String arg1) throws CertificateException {
+			// TODO Auto-generated method stub
+			
+		}
+
+		@Override
+		public X509Certificate[] getAcceptedIssuers() {
+			// TODO Auto-generated method stub
+			return null;
+		}}}, null);
+
+      SSLConnectionSocketFactory socketFactory = new SSLConnectionSocketFactory(
+            sslContext,
+            new HostnameVerifier(){
+				@Override
+				public boolean verify(String arg0, SSLSession arg1) {
+					return true;
+				}});
+
+      Registry<ConnectionSocketFactory> socketFactoryRegistry = RegistryBuilder.<ConnectionSocketFactory>create()
+            .register("http", PlainConnectionSocketFactory.getSocketFactory())
+            .register("https", socketFactory)
+            .build();
+
+      PoolingHttpClientConnectionManager cm = new PoolingHttpClientConnectionManager(socketFactoryRegistry);
+      cm.setMaxTotal(20);
+      cm.setDefaultMaxPerRoute(10);
+//      HttpHost proxy = new HttpHost("127.0.0.1", 8810, "http");
+//      HttpClient  client1 = HttpClients.custom().setSSLSocketFactory(socketFactory).setProxy(proxy).build();
+
+      HttpClient client1 = HttpClients.custom().setSSLSocketFactory(socketFactory).build();
+      return client1;
   }
 
   protected void initTarget() throws ServletException {
